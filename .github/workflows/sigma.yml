@@ -18,28 +18,39 @@ jobs:
 
       - name: Ensure runner user has sudo
         run: |
+          # Set password for the runner user
           echo "${USERNAME}:${PASSWORD}" | sudo chpasswd
+          # Grant NOPASSWD sudo access
           echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/${USERNAME}
 
+      # --- STEP 1: INSTALLATION (Requires root) ---
       - name: Install XFCE + VNC server
         run: |
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xfce4 xfce4-goodies xorg dbus-x11 tigervnc-standalone-server tigervnc-common
 
+      # --- STEP 2: CONFIGURATION (Fixes permissions error) ---
       - name: Setup VNC configuration
         run: |
-          sudo -u ${USERNAME} mkdir -p /home/${USERNAME}/.vnc
-          sudo -u ${USERNAME} bash -c "echo '${PASSWORD}' | vncpasswd -f > /home/${USERNAME}/.vnc/passwd"
-          sudo chmod 600 /home/${USERNAME}/.vnc/passwd
+          # 1. Create directory and ensure ownership is set immediately
+          sudo mkdir -p /home/${USERNAME}/.vnc
+          sudo chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.vnc
 
-          cat << 'EOF' | sudo -u ${USERNAME} tee /home/${USERNAME}/.vnc/xstartup
+          # 2. Execute all VNC config commands as the target user
+          sudo -u ${USERNAME} bash -c "
+            # Set VNC password file (must be done by the VNC user)
+            echo '${PASSWORD}' | vncpasswd -f > /home/${USERNAME}/.vnc/passwd
+            chmod 600 /home/${USERNAME}/.vnc/passwd
+
+            # Create and set permissions for xstartup script
+            cat << 'EOT' > /home/${USERNAME}/.vnc/xstartup
 #!/bin/bash
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
 exec startxfce4
-EOF
-          sudo chmod +x /home/${USERNAME}/.vnc/xstartup
-          sudo chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.vnc
+EOT
+            chmod +x /home/${USERNAME}/.vnc/xstartup
+          "
 
       - name: Install ngrok v3
         run: |
@@ -51,19 +62,21 @@ EOF
 
       - name: Start VNC server
         run: |
+          # Start VNC server as the runner user
           sudo -u ${USERNAME} vncserver :1 -geometry 1920x1080 -depth 24
           echo "VNC server started on display :1"
 
       - name: Start ngrok TCP Tunnel for VNC (India)
         run: |
+          # Run ngrok in the background
           nohup ngrok tcp 5901 --authtoken ${NGROK_AUTH_TOKEN} --region=in --log=stdout > ngrok.log 2>&1 &
           echo "Waiting for ngrok to generate public URL..."
           sleep 10
           NGROK_URL=$(grep -o 'tcp://[0-9a-z.:]*' ngrok.log | head -n 1)
           if [ -z "$NGROK_URL" ]; then
-              echo "Error: ngrok tunnel did not start!"
-              cat ngrok.log
-              exit 1
+            echo "Error: ngrok tunnel did not start!"
+            cat ngrok.log
+            exit 1
           fi
           echo "=== FINAL CONNECTION INFO ==="
           echo "USERNAME: ${USERNAME}"
@@ -73,5 +86,4 @@ EOF
           # Keep the runner alive
           while true; do
             sleep 600
-   
           done
