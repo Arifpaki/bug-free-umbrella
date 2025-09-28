@@ -1,5 +1,6 @@
 name: Setup XFCE Runner + ngrok v3 (India) with VNC
-on: 
+
+on:
   workflow_dispatch:
 
 permissions:
@@ -18,39 +19,34 @@ jobs:
 
       - name: Ensure runner user has sudo
         run: |
-          # Set password for the runner user
           echo "${USERNAME}:${PASSWORD}" | sudo chpasswd
-          # Grant NOPASSWD sudo access
           echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/${USERNAME}
 
-      # --- STEP 1: INSTALLATION (Requires root) ---
+      # --- STEP 1: INSTALLATION ---
       - name: Install XFCE + VNC server
         run: |
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xfce4 xfce4-goodies xorg dbus-x11 tigervnc-standalone-server tigervnc-common
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            xfce4 xfce4-goodies xorg dbus-x11 tigervnc-standalone-server tigervnc-common
 
-      # --- STEP 2: CONFIGURATION (Fixes permissions error) ---
+      # --- STEP 2: CONFIGURATION ---
       - name: Setup VNC configuration
         run: |
-          # 1. Create directory and ensure ownership is set immediately
           sudo mkdir -p /home/${USERNAME}/.vnc
           sudo chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.vnc
 
-          # 2. Execute all VNC config commands as the target user
-          sudo -u ${USERNAME} bash -c "
-            # Set VNC password file (must be done by the VNC user)
-            echo '${PASSWORD}' | vncpasswd -f > /home/${USERNAME}/.vnc/passwd
-            chmod 600 /home/${USERNAME}/.vnc/passwd
+          # Create VNC password as the runner user
+          sudo -u ${USERNAME} env PASSWORD="${PASSWORD}" bash -lc 'umask 077; echo "$PASSWORD" | vncpasswd -f > "$HOME/.vnc/passwd"'
 
-            # Create and set permissions for xstartup script
-            cat << 'EOT' > /home/${USERNAME}/.vnc/xstartup
+          # Create xstartup and set permissions
+          cat > /home/${USERNAME}/.vnc/xstartup << "EOT"
 #!/bin/bash
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
 exec startxfce4
 EOT
-            chmod +x /home/${USERNAME}/.vnc/xstartup
-          "
+          sudo chmod +x /home/${USERNAME}/.vnc/xstartup
+          sudo chown ${USERNAME}:${USERNAME} /home/${USERNAME}/.vnc/xstartup
 
       - name: Install ngrok v3
         run: |
@@ -62,17 +58,20 @@ EOT
 
       - name: Start VNC server
         run: |
-          # Start VNC server as the runner user
           sudo -u ${USERNAME} vncserver :1 -geometry 1920x1080 -depth 24
           echo "VNC server started on display :1"
 
       - name: Start ngrok TCP Tunnel for VNC (India)
         run: |
-          # Run ngrok in the background
-          nohup ngrok tcp 5901 --authtoken ${NGROK_AUTH_TOKEN} --region=in --log=stdout > ngrok.log 2>&1 &
+          nohup ngrok tcp 5901 --authtoken "${NGROK_AUTH_TOKEN}" --region=in --log=stdout > ngrok.log 2>&1 &
           echo "Waiting for ngrok to generate public URL..."
-          sleep 10
-          NGROK_URL=$(grep -o 'tcp://[0-9a-z.:]*' ngrok.log | head -n 1)
+          for i in {1..30}; do
+            NGROK_URL=$(grep -o 'tcp://[0-9a-z.:]*' ngrok.log | head -n 1 || true)
+            if [ -n "$NGROK_URL" ]; then
+              break
+            fi
+            sleep 1
+          done
           if [ -z "$NGROK_URL" ]; then
             echo "Error: ngrok tunnel did not start!"
             cat ngrok.log
