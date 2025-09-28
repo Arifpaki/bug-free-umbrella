@@ -32,14 +32,14 @@ jobs:
           sudo -u ${USERNAME} mkdir -p /home/${USERNAME}/.vnc
           sudo -u ${USERNAME} bash -c "echo '${PASSWORD}' | vncpasswd -f > /home/${USERNAME}/.vnc/passwd"
           sudo chmod 600 /home/${USERNAME}/.vnc/passwd
-          
-          # Create xstartup file with proper permissions
-          sudo -u ${USERNAME} tee /home/${USERNAME}/.vnc/xstartup > /dev/null << 'EOF'
+
+          # Create xstartup file with proper permissions (fixed YAML heredoc)
+          sudo -u ${USERNAME} bash -c "cat > /home/${USERNAME}/.vnc/xstartup << 'EOF'
 #!/bin/bash
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
 exec startxfce4
-EOF
+EOF"
           sudo chmod +x /home/${USERNAME}/.vnc/xstartup
           sudo chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.vnc
 
@@ -75,4 +75,5 @@ EOF
           # Keep the runner alive
           while true; do
             sleep 600
+   
           done
