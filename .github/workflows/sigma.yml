@@ -25,13 +25,22 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xfce4 xfce4-goodies xorg dbus-x11 tigervnc-standalone-server tigervnc-common
-          mkdir -p /home/${USERNAME}/.vnc
-          echo "${PASSWORD}" | vncpasswd -f > /home/${USERNAME}/.vnc/passwd
-          chmod 600 /home/${USERNAME}/.vnc/passwd
-          echo "#!/bin/bash
-          xrdb \$HOME/.Xresources
-          startxfce4 &" | sudo tee /home/${USERNAME}/.vnc/xstartup
-          chmod +x /home/${USERNAME}/.vnc/xstartup
+
+      - name: Setup VNC configuration
+        run: |
+          # Create VNC config as the user
+          sudo -u ${USERNAME} mkdir -p /home/${USERNAME}/.vnc
+          sudo -u ${USERNAME} bash -c "echo '${PASSWORD}' | vncpasswd -f > /home/${USERNAME}/.vnc/passwd"
+          sudo chmod 600 /home/${USERNAME}/.vnc/passwd
+          
+          # Create xstartup file with proper permissions
+          sudo -u ${USERNAME} bash -c "cat > /home/${USERNAME}/.vnc/xstartup << 'EOF'
+#!/bin/bash
+unset SESSION_MANAGER
+unset DBUS_SESSION_BUS_ADDRESS
+exec startxfce4
+EOF"
+          sudo chmod +x /home/${USERNAME}/.vnc/xstartup
           sudo chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.vnc
 
       - name: Install ngrok v3
@@ -54,9 +63,9 @@ jobs:
           sleep 10
           NGROK_URL=$(grep -o 'tcp://[0-9a-z.:]*' ngrok.log | head -n 1)
           if [ -z "$NGROK_URL" ]; then
-            echo "Error: ngrok tunnel did not start!"
-            cat ngrok.log
-            exit 1
+              echo "Error: ngrok tunnel did not start!"
+              cat ngrok.log
+              exit 1
           fi
           echo "=== FINAL CONNECTION INFO ==="
           echo "USERNAME: ${USERNAME}"
@@ -66,5 +75,4 @@ jobs:
           # Keep the runner alive
           while true; do
             sleep 600
-     
           done
