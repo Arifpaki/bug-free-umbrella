@@ -29,7 +29,7 @@ jobs:
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xfce4 xfce4-goodies xorg dbus-x11 tigervnc-standalone-server tigervnc-common
 
-      # --- Step 2: Configuration (Requires runner user context) ---
+      # --- Step 2: Configuration (Fixes the 'unset SESSION_MANAGER' error) ---
       - name: Setup VNC configuration
         run: |
           # Create .vnc directory and set proper ownership
@@ -37,12 +37,13 @@ jobs:
           sudo chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.vnc
 
           # Execute VNC setup commands as the runner user
+          # Encapsulating all commands in a single bash -c block ensures proper user context and file permissions.
           sudo -u ${USERNAME} bash -c "
             # Set VNC password
             echo '${PASSWORD}' | vncpasswd -f > /home/${USERNAME}/.vnc/passwd
             chmod 600 /home/${USERNAME}/.vnc/passwd
 
-            # Create and set permissions for xstartup file
+            # Create and set permissions for xstartup file using a quoted here-document
             cat << 'EOT' > /home/${USERNAME}/.vnc/xstartup
 #!/bin/bash
 unset SESSION_MANAGER
