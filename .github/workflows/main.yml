@@ -17,21 +17,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ensure runner user has sudo
+      - name: Ensure runner user has sudo + home dir
         run: |
+          sudo mkdir -p /home/${USERNAME}
           echo "${USERNAME}:${PASSWORD}" | sudo chpasswd
           echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/${USERNAME}
+          sudo chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
 
-      - name: Install XFCE + xrdp
+      - name: Install Optimized XFCE + XRDP
         run: |
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xfce4 xfce4-goodies xorg dbus-x11 xrdp
-
-          echo "startxfce4" | sudo tee /home/${USERNAME}/.xsession
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            xfce4 xfce4-goodies xorg dbus-x11 xrdp \
+            openbox compiz compiz-plugins-default \
+            x11vnc tigervnc-standalone-server
+          
+          # Critical: Disable heavy XFCE components
+          sudo sed -i '/^#?KATEX_INLINE_OPENpanels\|pluginsKATEX_INLINE_CLOSE/d' /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
+          sudo sed -i 's/<property name="visible" type="bool" value="true"/<property name="visible" type="bool" value="false"/' /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
+          
+          # Use Openbox as lightweight WM instead of XFWM
+          echo "exec openbox-session" | sudo tee /home/${USERNAME}/.xsession
           sudo chown ${USERNAME}:${USERNAME} /home/${USERNAME}/.xsession
-          echo "exec startxfce4" | sudo tee /etc/skel/.xsession
-          echo "startxfce4" | sudo tee /etc/skel/.xinitrc
-
+          chmod +x /home/${USERNAME}/.xsession
+          
+          # Network optimizations for India
+          echo "color_depth=16" | sudo tee -a /etc/xrdp/sesman.ini
+          echo "max_bpp=16" | sudo tee -a /etc/xrdp/sesman.ini
+          echo "session_wait_time=10" | sudo tee -a /etc/xrdp/sesman.ini
+          
+          # Disable visual effects globally
+          sudo sed -i 's/.*sm_render_sync.*/#&/' /etc/X11/xorg.conf.d/10-dpms.conf
+          gsettings set org.gnome.desktop.interface enable-animations false
+          gsettings set org.gnome.desktop.interface text-scaling-factor 0.9
+          
           sudo systemctl enable --now xrdp
           sudo systemctl restart xrdp
 
@@ -43,28 +62,42 @@ jobs:
           sudo mv ngrok /usr/local/bin/
           ngrok version
 
-      - name: Start ngrok TCP Tunnel for RDP (India)
+      - name: Start ngrok TCP Tunnel (India Region)
         run: |
-          # Start ngrok in the background with India region
-          nohup ngrok tcp 3389 --authtoken ${NGROK_AUTH_TOKEN} --region=in --log=stdout > ngrok.log 2>&1 &
-
-          echo "Waiting for ngrok to generate public URL..."
-          sleep 10
-
-          # Grab the TCP URL from ngrok v3 log
-          NGROK_URL=$(grep -o 'tcp://[0-9a-z.:]*' ngrok.log | head -n 1)
-
+          # Start ngrok with India-specific optimizations
+          nohup ngrok tcp 3389 \
+            --authtoken=${NGROK_AUTH_TOKEN} \
+            --region=in \
+            --log=stdout \
+            --tcp-mux \
+            --log-level=warn > ngrok.log 2>&1 &
+          
+          echo "⏳ Waiting for stable tunnel (India region)..."
+          sleep 15
+          
+          # Get clean TCP URL (ignore WebSocket URLs)
+          NGROK_URL=$(grep -o 'tcp://[0-9a-z.:]*' ngrok.log | grep -v 'websocket' | head -n1)
+          
           if [ -z "$NGROK_URL" ]; then
-            echo "Error: ngrok tunnel did not start!"
+            echo "❌ Tunnel failed! Logs:"
             cat ngrok.log
             exit 1
           fi
-
-          echo "=== FINAL CONNECTION INFO ==="
+          
+          echo "🚀 RUNNER READY (India-Optimized)!"
+          echo "==================================="
           echo "USERNAME: ${USERNAME}"
           echo "PASSWORD: ${PASSWORD}"
-          echo "Connect via RDP using: ${NGROK_URL}"
-
-          # Keep the runner alive
+          echo "RDP CONNECT: ${NGROK_URL}"
+          echo "→ Pro Tip: Use 'Remote Desktop Connection' on Windows"
+          echo "  or 'Remmina' on Linux with 'Performance > Speed > LAN'"
+          echo "==================================="
+          
+          # Keep alive with low-CPU loop
           while true; do 
-          sleep 600; done
+            sleep 300
+            # Reconnect ngrok if dead
+            if ! pgrep -f "ngrok tcp 3389" > /dev/null; then
+              nohup ngrok tcp 3389 --authtoken=${NGROK_AUTH_TOKEN} --region=in --log=stdout > ngrok.log 2>&1 &
+            fi
+          done
