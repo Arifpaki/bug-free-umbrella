@@ -1,4 +1,4 @@
-name: Setup XFCE Runner + ngrok v3 (India) with VNC
+name: Setup XFCE Desktop + ngrok VNC Tunnel (India)
 
 on:
   workflow_dispatch:
@@ -7,82 +7,109 @@ permissions:
   contents: read
 
 jobs:
-  setup-gui-runner:
-    runs-on: ubuntu-latest
+  setup-desktop-environment:
+    runs-on: ubuntu-22.04
     env:
       NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
       USERNAME: runner
-      PASSWORD: runner
+      PASSWORD: ${{ secrets.VNC_PASSWORD || 'runner' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - name: Ensure runner user has sudo
+      - name: Configure User Permissions
         run: |
           echo "${USERNAME}:${PASSWORD}" | sudo chpasswd
           echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/${USERNAME}
+          sudo usermod -aG video ${USERNAME}
 
-      # --- STEP 1: INSTALLATION ---
-      - name: Install XFCE + VNC server
+      - name: Update System Packages
         run: |
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-            xfce4 xfce4-goodies xorg dbus-x11 tigervnc-standalone-server tigervnc-common
+          sudo apt-get upgrade -y -qq
 
-      # --- STEP 2: CONFIGURATION ---
-      - name: Setup VNC configuration
+      - name: Install Desktop Environment
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            xfce4 \
+            xfce4-goodies \
+            xorg \
+            dbus-x11 \
+            tigervnc-standalone-server \
+            tigervnc-common \
+            firefox \
+            xfce4-terminal \
+            thunar-archive-plugin \
+            arc-theme \
+            papirus-icon-theme
+
+      - name: Configure VNC Server
         run: |
           sudo mkdir -p /home/${USERNAME}/.vnc
           sudo chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.vnc
-
-          # Create VNC password as the runner user
-          sudo -u ${USERNAME} env PASSWORD="${PASSWORD}" bash -lc 'umask 077; echo "$PASSWORD" | vncpasswd -f > "$HOME/.vnc/passwd"'
-
-          # Create xstartup and set permissions
-          cat > /home/${USERNAME}/.vnc/xstartup << "EOT"
+          
+          sudo -u ${USERNAME} bash -c "
+            echo '${PASSWORD}' | vncpasswd -f > /home/${USERNAME}/.vnc/passwd
+            chmod 600 /home/${USERNAME}/.vnc/passwd
+            
+            cat << 'EOT' > /home/${USERNAME}/.vnc/xstartup
 #!/bin/bash
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
+export XKL_XMODMAP_DISABLE=1
+export XDG_CURRENT_DESKTOP=XFCE
+export XDG_SESSION_TYPE=x11
+export XDG_SESSION_DESKTOP=xfce
+export DESKTOP_SESSION=xfce
 exec startxfce4
 EOT
-          sudo chmod +x /home/${USERNAME}/.vnc/xstartup
-          sudo chown ${USERNAME}:${USERNAME} /home/${USERNAME}/.vnc/xstartup
+            chmod +x /home/${USERNAME}/.vnc/xstartup
+          "
 
-      - name: Install ngrok v3
+      - name: Install ngrok
         run: |
-          sudo apt-get install -y -qq wget unzip
-          wget -q -O ngrok.zip https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip
-          unzip -qq ngrok.zip
-          sudo mv ngrok /usr/local/bin/
-          ngrok version
+          curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+          echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ngrok
+          ngrok --version
 
-      - name: Start VNC server
+      - name: Start VNC Server
         run: |
-          sudo -u ${USERNAME} vncserver :1 -geometry 1920x1080 -depth 24
+          sudo -u ${USERNAME} vncserver :1 -geometry 1920x1080 -depth 24 -localhost no
           echo "VNC server started on display :1"
 
-      - name: Start ngrok TCP Tunnel for VNC (India)
+      - name: Configure ngrok Tunnel
         run: |
-          nohup ngrok tcp 5901 --authtoken "${NGROK_AUTH_TOKEN}" --region=in --log=stdout > ngrok.log 2>&1 &
-          echo "Waiting for ngrok to generate public URL..."
-          for i in {1..30}; do
-            NGROK_URL=$(grep -o 'tcp://[0-9a-z.:]*' ngrok.log | head -n 1 || true)
-            if [ -n "$NGROK_URL" ]; then
-              break
-            fi
-            sleep 1
-          done
-          if [ -z "$NGROK_URL" ]; then
-            echo "Error: ngrok tunnel did not start!"
-            cat ngrok.log
+          sudo -u ${USERNAME} ngrok authtoken ${NGROK_AUTH_TOKEN}
+          sudo -u ${USERNAME} nohup ngrok tcp 5901 --region=in > /tmp/ngrok.log 2>&1 &
+          echo "Waiting for ngrok tunnel..."
+          sleep 8
+
+      - name: Display Connection Information
+        run: |
+          NGROK_URL=$(curl -s localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url' 2>/dev/null || echo "")
+          if [ -z "$NGROK_URL" ] || [ "$NGROK_URL" = "null" ]; then
+            echo "❌ Failed to establish ngrok tunnel"
+            echo "Log output:"
+            cat /tmp/ngrok.log || echo "No log found"
             exit 1
           fi
-          echo "=== FINAL CONNECTION INFO ==="
-          echo "USERNAME: ${USERNAME}"
-          echo "VNC Password: ${PASSWORD}"
-          echo "Connect via VNC using: ${NGROK_URL}"
+          
+          echo "✅ SUCCESS: Desktop environment is ready!"
+          echo ""
+          echo "🔗 CONNECT TO DESKTOP:"
+          echo "   VNC Address: ${NGROK_URL#tcp://}"
+          echo "   Username: ${USERNAME}"
+          echo "   Password: ${PASSWORD}"
+          echo ""
+          echo "💡 TIPS:"
+          echo "   • Use any VNC client to connect"
+          echo "   • Session will remain active for 6 hours"
+          echo "   • Firefox and terminal are pre-installed"
 
-          # Keep the runner alive
-          while true; do
-            sleep 600
-          done
+      - name: Keep Workflow Alive
+        run: |
+          echo "🖥️ Desktop session active - waiting for connections..."
+          timeout 360m bash -c "while true; do sleep 60; done" || echo "Session expired after 6 hours"
