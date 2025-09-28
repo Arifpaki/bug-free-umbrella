@@ -25,12 +25,11 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xfce4 xfce4-goodies xorg dbus-x11 tigervnc-standalone-server tigervnc-common
-          # Create VNC config for the user
           mkdir -p /home/${USERNAME}/.vnc
           echo "${PASSWORD}" | vncpasswd -f > /home/${USERNAME}/.vnc/passwd
           chmod 600 /home/${USERNAME}/.vnc/passwd
           echo "#!/bin/bash
-          xrdb $HOME/.Xresources
+          xrdb \$HOME/.Xresources
           startxfce4 &" | sudo tee /home/${USERNAME}/.vnc/xstartup
           chmod +x /home/${USERNAME}/.vnc/xstartup
           sudo chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.vnc
@@ -55,9 +54,9 @@ jobs:
           sleep 10
           NGROK_URL=$(grep -o 'tcp://[0-9a-z.:]*' ngrok.log | head -n 1)
           if [ -z "$NGROK_URL" ]; then
-              echo "Error: ngrok tunnel did not start!"
-              cat ngrok.log
-              exit 1
+            echo "Error: ngrok tunnel did not start!"
+            cat ngrok.log
+            exit 1
           fi
           echo "=== FINAL CONNECTION INFO ==="
           echo "USERNAME: ${USERNAME}"
@@ -68,4 +67,4 @@ jobs:
           while true; do
             sleep 600
      
-done
+          done
