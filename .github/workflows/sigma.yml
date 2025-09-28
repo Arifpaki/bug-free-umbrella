@@ -31,8 +31,8 @@ jobs:
           sudo -u ${USERNAME} mkdir -p /home/${USERNAME}/.vnc
           sudo -u ${USERNAME} bash -c "echo '${PASSWORD}' | vncpasswd -f > /home/${USERNAME}/.vnc/passwd"
           sudo chmod 600 /home/${USERNAME}/.vnc/passwd
-          
-          sudo -u ${USERNAME} tee /home/${USERNAME}/.vnc/xstartup > /dev/null <<EOF
+
+          cat << 'EOF' | sudo -u ${USERNAME} tee /home/${USERNAME}/.vnc/xstartup
 #!/bin/bash
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
@@ -73,4 +73,5 @@ EOF
           # Keep the runner alive
           while true; do
             sleep 600
+   
           done
