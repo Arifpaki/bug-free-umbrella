@@ -34,12 +34,10 @@ jobs:
           sudo chmod 600 /home/${USERNAME}/.vnc/passwd
           
           # Create xstartup file with proper permissions
-          sudo -u ${USERNAME} bash -c "cat > /home/${USERNAME}/.vnc/xstartup << 'EOF'
-#!/bin/bash
+          echo '#!/bin/bash
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
-exec startxfce4
-EOF"
+exec startxfce4' | sudo -u ${USERNAME} tee /home/${USERNAME}/.vnc/xstartup > /dev/null
           sudo chmod +x /home/${USERNAME}/.vnc/xstartup
           sudo chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.vnc
 
