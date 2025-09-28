@@ -1,119 +1,107 @@
-name: 💥 KDE Plasma "Windows 11" + Chrome (India)
+name: KDE Plasma Desktop + Chrome + VNC + ngrok
 
-on: workflow_dispatch
-
-env:
-  NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
-  VNC_PASSWORD: fake-windows-2019
-  PLASMA_THEME: Win11-Theme
-
-permissions:
-  contents: read
+on:
+  workflow_dispatch:
+    inputs:
+      resolution:
+        description: Display resolution (e.g., 1920x1080)
+        required: false
+        default: 1920x1080
+      keep_alive:
+        description: Minutes to keep alive (max 360)
+        required: false
+        default: 60
 
 jobs:
-  fake-windows-11:
+  kde-plasma-chrome:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 360
+    env:
+      USERNAME: runner
+      PASSWORD: ${{ secrets.VNC_PASSWORD || 'kde12345' }}
+      RESOLUTION: ${{ github.event.inputs.resolution || '1920x1080' }}
+      KEEP_MINUTES: ${{ github.event.inputs.keep_alive || '60' }}
+      NGROK_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+
     steps:
-      - name: "🚀 DEPLOYING WINDOWS 11 PRO + CHROME (lol)"
+      - name: Validate secrets
         run: |
-          # Install KDE Plasma with Windows 11 theme
-          sudo apt update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt install -y -qq \
-            kde-plasma-desktop xrdp sddm breeze-themes \
-            plasma-workspace-wallpapers plasma-themes \
-            git curl unzip wget gnupg apt-transport-https
+          if [ -z "${NGROK_TOKEN}" ]; then
+            echo "❌ Set NGROK_AUTH_TOKEN secret in repo settings"
+            exit 1
+          fi
 
-          # Install Google Chrome (properly configured for headless)
-          wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg
-          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq google-chrome-stable
+      - name: Install KDE Plasma + VNC
+        run: |
+          sudo apt update
+          sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+            kde-plasma-desktop \
+            tigervnc-standalone-server \
+            tigervnc-common \
+            wget unzip curl jq
+
+      - name: Install Google Chrome
+        run: |
+          wget -q -O chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt install -y ./chrome.deb
+          rm chrome.deb
+
+      - name: Setup VNC config
+        run: |
+          mkdir -p "$HOME/.vnc"
+          echo "${PASSWORD}" | vncpasswd -f > "$HOME/.vnc/passwd"
+          chmod 600 "$HOME/.vnc/passwd"
           
-          # Configure Chrome for GitHub Actions environment
-          mkdir -p $HOME/.config/google-chrome/Default
-          cat > $HOME/.config/google-chrome/Default/Preferences << "EOF"
-          {
-            "browser": {
-              "show_home_button": false,
-              "check_default_browser": false
-            },
-            "extensions": {
-              "chrome_url_overrides": {
-                "newtab": "chrome://new-tab-page/"
-              }
-            },
-            "profile": {
-              "exit_type": "None",
-              "exited_cleanly": true
-            },
-            "session": {
-              "restore_on_startup": 4,
-              "startup_urls": ["https://github.com"]
-            }
-          }
-          EOF
+          # Create xstartup for KDE Plasma with autostart
+          cat > "$HOME/.vnc/xstartup" << 'EOF'
+#!/bin/bash
+unset SESSION_MANAGER
+unset DBUS_SESSION_BUS_ADDRESS
 
-          # Apply Windows 11 theme
-          git clone -q https://github.com/B00merang-ArchLinux/Win11-Theme.git
-          sudo cp -r Win11-Theme/* /usr/share/
-          rm -rf Win11-Theme
+# Start KDE Plasma
+exec startplasma-x11
+EOF
+          chmod +x "$HOME/.vnc/xstartup"
 
-          # Configure Plasma to look like Windows 11 + Chrome taskbar integration
-          cat > $HOME/.config/plasma-workspace/env/windows11.sh << "EOF"
-          #!/bin/sh
-          kwriteconfig5 --file kdeglobals --group "General" --key "ColorScheme" "BreezeLight"
-          kwriteconfig5 --file kwinrc --group "Windows" --key "BorderSize" "None"
-          kwriteconfig5 --file plasmarc --group "Favourites" --key "apps" "org.kde.konsole.desktop,google-chrome.desktop"
-          kwriteconfig5 --file plasmarc --group "PlasmaViews" --key "PanelPosition" "bottom"
-          kwriteconfig5 --file plasmarc --group "PlasmaViews" --key "PanelSize" "40"
-          kwriteconfig5 --file plasmarc --group "PlasmaViews" --key "PanelAlignment" "center"
-          kwriteconfig5 --file plasmarc --group "PlasmaViews" --key "PanelAutoHide" "false"
-          kwriteconfig5 --file plasmarc --group "PlasmaViews" --key "PanelVisibility" "always"
-          kwriteconfig5 --file plasmarc --group "PlasmaViews" --key "PanelLock" "true"
-          kwriteconfig5 --file ksmserverrc --group "General" --key "loginMode" "emptySession"
-          EOF
-          chmod +x $HOME/.config/plasma-workspace/env/windows11.sh
+          # Create autostart script to launch Chrome
+          mkdir -p "$HOME/.config/autostart"
+          cat > "$HOME/.config/autostart/chrome.desktop" << 'EOF'
+[Desktop Entry]
+Type=Application
+Name=Chrome
+Exec=google-chrome --no-sandbox --disable-dev-shm-usage
+Icon=google-chrome
+EOF
 
-          # Configure RDP
-          echo "startplasma-x11" > $HOME/.xsession
-          sudo sed -i 's/allowed_users=console/allowed_users=anybody/' /etc/X11/Xwrapper.config
-          sudo systemctl enable xrdp
-          sudo systemctl restart xrdp
+      - name: Start VNC server
+        run: |
+          vncserver -kill :1 || true
+          vncserver :1 -geometry "${RESOLUTION}" -depth 24
+          echo "✅ VNC started on :1"
 
-          # Install ngrok
+      - name: Setup ngrok
+        run: |
           wget -q -O ngrok.zip https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip
           unzip -qq ngrok.zip
-          sudo mv ngrok /usr/local/bin/
-          ngrok authtoken $NGROK_AUTH_TOKEN
+          sudo install ngrok /usr/local/bin/
+          ngrok config add-authtoken "${NGROK_TOKEN}"
 
-          # Start ngrok tunnel (India region)
-          nohup ngrok tcp 3389 --region=in --log=stdout > ngrok.log 2>&1 &
-          
-          # Wait for tunnel
-          echo "⏳ Warming up Windows 11 + Chrome... (this takes 120s)"
-          sleep 120
-          NGROK_URL=$(grep -o 'tcp://[^ ]*' ngrok.log | head -1)
-          
-          # Display connection info
-          echo -e "\n\n\n\n\n\n\n\n\n\n"
-          echo "========================================"
-          echo " WINDOWS 11 PRO + CHROME ACTIVATED (lol) "
-          echo "========================================"
-          echo "RDP Address: $NGROK_URL"
-          echo "Username: ${USER}"
-          echo "Password: $VNC_PASSWORD"
-          echo "Theme: $PLASMA_THEME"
-          echo "Desktop: KDE Plasma 5.27 (Windows 11 Skin)"
-          echo "Browser: Google Chrome (pinned to taskbar)"
-          echo "========================================"
-          echo "⚠️ THIS IS KDE PLASMA - NOT REAL WINDOWS ⚠️"
-          echo "Connect with Microsoft Remote Desktop:"
-          echo "1. Download: https://aka.ms/rdmaclient"
-          echo "2. Enter address: ${NGROK_URL#tcp://}"
-          echo "3. Use password: $VNC_PASSWORD"
-          echo "4. Chrome is pre-installed and pinned!"
-          echo "========================================"
-          
-          # Keep alive (max 6 hours)
-          while true; do sleep 300; done
+      - name: Start ngrok tunnel
+        run: |
+          ngrok tcp 5901 --region=in --log=stdout > ngrok.log 2>&1 &
+          sleep 8
+          URL=$(curl -s localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url')
+          if [ -z "$URL" ] || [ "$URL" = "null" ]; then
+            echo "❌ Failed to get ngrok URL"
+            cat ngrok.log
+            exit 1
+          fi
+          echo "🔗 CONNECT HERE: ${URL}"
+          echo "👤 USER: ${USERNAME}"
+          echo "🔑 PASS: ${PASSWORD}"
+          echo "🌍 CHROME WILL AUTO-START - BROWSE AFTER CONNECTING!"
+
+      - name: Keep alive
+        run: |
+          echo "⏰ Keeping session alive for ${KEEP_MINUTES} minutes..."
+          sleep $(( KEEP_MINUTES * 60 ))
