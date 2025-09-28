@@ -32,7 +32,7 @@ jobs:
           sudo -u ${USERNAME} bash -c "echo '${PASSWORD}' | vncpasswd -f > /home/${USERNAME}/.vnc/passwd"
           sudo chmod 600 /home/${USERNAME}/.vnc/passwd
           
-          sudo -u ${USERNAME} tee /home/${USERNAME}/.vnc/xstartup > /dev/null << 'EOF'
+          sudo -u ${USERNAME} tee /home/${USERNAME}/.vnc/xstartup > /dev/null <<EOF
 #!/bin/bash
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS
