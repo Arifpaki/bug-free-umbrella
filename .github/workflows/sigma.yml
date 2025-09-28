@@ -25,17 +25,19 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xfce4 xfce4-goodies xorg dbus-x11 tigervnc-standalone-server tigervnc-common
-          
-          # Create VNC config as the user
+
+      - name: Setup VNC configuration
+        run: |
           sudo -u ${USERNAME} mkdir -p /home/${USERNAME}/.vnc
           sudo -u ${USERNAME} bash -c "echo '${PASSWORD}' | vncpasswd -f > /home/${USERNAME}/.vnc/passwd"
           sudo chmod 600 /home/${USERNAME}/.vnc/passwd
           
-          sudo -u ${USERNAME} bash -c "cat > /home/${USERNAME}/.vnc/xstartup << 'EOF'
+          sudo -u ${USERNAME} tee /home/${USERNAME}/.vnc/xstartup > /dev/null << 'EOF'
 #!/bin/bash
-xrdb \$HOME/.Xresources
-startxfce4 &
-EOF"
+unset SESSION_MANAGER
+unset DBUS_SESSION_BUS_ADDRESS
+exec startxfce4
+EOF
           sudo chmod +x /home/${USERNAME}/.vnc/xstartup
           sudo chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.vnc
 
@@ -71,5 +73,4 @@ EOF"
           # Keep the runner alive
           while true; do
             sleep 600
-     
           done
