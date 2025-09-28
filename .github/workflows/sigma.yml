@@ -1,5 +1,5 @@
 name: Setup XFCE Runner + ngrok v3 (India) with VNC
-on:
+on: 
   workflow_dispatch:
 
 permissions:
@@ -24,28 +24,24 @@ jobs:
       - name: Install XFCE + VNC server
         run: |
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xfce4 xfce4-goodies xorg dbus-x11 tigervnc-standalone-server tigervnc-common wget unzip
-
-      - name: Setup VNC configuration
-        run: |
-          HOME_DIR="/home/${USERNAME}"
-          mkdir -p "${HOME_DIR}/.vnc"
-
-          # Create VNC password file
-          echo "${PASSWORD}" | vncpasswd -f > "${HOME_DIR}/.vnc/passwd"
-          chmod 600 "${HOME_DIR}/.vnc/passwd"
-
-          # Create xstartup
-          cat > "${HOME_DIR}/.vnc/xstartup" << 'EOF'
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xfce4 xfce4-goodies xorg dbus-x11 tigervnc-standalone-server tigervnc-common
+          
+          # Create VNC config as the user
+          sudo -u ${USERNAME} mkdir -p /home/${USERNAME}/.vnc
+          sudo -u ${USERNAME} bash -c "echo '${PASSWORD}' | vncpasswd -f > /home/${USERNAME}/.vnc/passwd"
+          sudo chmod 600 /home/${USERNAME}/.vnc/passwd
+          
+          sudo -u ${USERNAME} bash -c "cat > /home/${USERNAME}/.vnc/xstartup << 'EOF'
 #!/bin/bash
-unset SESSION_MANAGER
-unset DBUS_SESSION_BUS_ADDRESS
-exec startxfce4
-EOF
-          chmod +x "${HOME_DIR}/.vnc/xstartup"
+xrdb \$HOME/.Xresources
+startxfce4 &
+EOF"
+          sudo chmod +x /home/${USERNAME}/.vnc/xstartup
+          sudo chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.vnc
 
       - name: Install ngrok v3
         run: |
+          sudo apt-get install -y -qq wget unzip
           wget -q -O ngrok.zip https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip
           unzip -qq ngrok.zip
           sudo mv ngrok /usr/local/bin/
@@ -53,7 +49,7 @@ EOF
 
       - name: Start VNC server
         run: |
-          vncserver :1 -geometry 1920x1080 -depth 24
+          sudo -u ${USERNAME} vncserver :1 -geometry 1920x1080 -depth 24
           echo "VNC server started on display :1"
 
       - name: Start ngrok TCP Tunnel for VNC (India)
@@ -72,8 +68,8 @@ EOF
           echo "VNC Password: ${PASSWORD}"
           echo "Connect via VNC using: ${NGROK_URL}"
 
-          # Keep runner alive
+          # Keep the runner alive
           while true; do
             sleep 600
-  
+     
           done
